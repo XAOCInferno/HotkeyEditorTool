@@ -7,368 +7,545 @@ using System.Linq;
 
 public class KeybindingDisplayAndEditor : MonoBehaviour
 {
-	public OneSingleTile ExemplarTile;
+	[SerializeField] private Tile ExampleTile;
 
-	public RectTransform parentWindow;
-	[SerializeField] private ChangeHKPopup CHKP;
-	[SerializeField] private DeleteHotkeyPopup DHP;
-	[SerializeField] private AddHotkeyPopup AHP;
-	[SerializeField] private Scrollbar SB;
-	public GameObject PleaseWaitPopup;
+	[SerializeField] private RectTransform ParentWindow;
+	[SerializeField] private Scrollbar GridViewScrollBar;
 
-	private Dictionary<int, OneSingleTile> AllEntries = new();
+	private Dictionary<int, Tile> AllEntries = new();
 	private char[] Ignore = new char[4] { '{', '}', '=', '-' };
-	private float[] parentWindowOriginalYOffset;
+	private float[] ParentWindowOriginalYOffset;
 	private int NextUniqueID;
 	private string OpenedPath;
+	private float LoadingUpdateRate = 0.025f;
+	private GridLayoutGroup LayoutGroupForEntries;
 
-	OneSingleTile MakeFreshCopyOfExampleTile(int PositionInParent, int PositionInWrittenFile)
+	private const int IndexOfIdentifiableWatermark = 3;
+	private readonly string[] Watermark = new string[6]
 	{
-		// create it and simultaneously parent it to the same place in the UI
-		var copy = Instantiate<OneSingleTile>(ExemplarTile, ExemplarTile.transform.parent);
-		copy.PositionInWrittenFile = PositionInWrittenFile;
-		// make it visible
-		copy.gameObject.SetActive(true);
+		"----------------------------------------------------------------------------------------------------------------",
+		"",
+		"        ----------------------------------------------------------------------------------------------------------------",
+		"        -- Created using Dawn of War Hotkey Editor Tool. https://www.moddb.com/mods/hotkey-editor-tool",
+		"        ----------------------------------------------------------------------------------------------------------------",
+		""
+	};
 
-		return copy;
+	Tile InstantiateNewExampleTile(int PositionInFile, int IDInDictionary)
+	{
+
+		//Create new tile, assign its position in the file, then activate it
+		Tile newTile = Instantiate(ExampleTile, ExampleTile.transform.parent);
+
+		newTile.PositionInFile = PositionInFile;
+		newTile.IDInDictionary = IDInDictionary;
+
+		newTile.gameObject.SetActive(true);
+
+		return newTile;
+
 	}
 
-	private void Start()
+	private void Awake()
 	{
-		parentWindowOriginalYOffset = new float[2] { parentWindow.offsetMin[1], parentWindow.offsetMax[1] };
-		ExemplarTile.gameObject.SetActive(false);
+
+		//Find the top of parent window
+		ParentWindowOriginalYOffset = new float[2] { ParentWindow.offsetMin[1], ParentWindow.offsetMax[1] };
+
+		//Find the grid in parent window
+		ParentWindow.TryGetComponent(out LayoutGroupForEntries);
+
+		//Disable the example tile which is not being used
+		ExampleTile.gameObject.SetActive(false);
+
 	}
 
-    public void ClearOldEntries()
-    {
-		SB.value = 0;
-		for(int i = 0; i < NextUniqueID; i++)
+	private void OnEnable()
+	{
+
+		Actions.OnDisplayData += DisplayFileData;
+		Actions.OnSetBasicButtonInteractability += SetAllEntryButtonInput;
+		Actions.OnDeleteSpecificEntry += DeleteSpecificEntry;
+		Actions.OnAddEntryAfterSpecificEntry += AddEntryAfterSpecificEntry;
+		Actions.OnSaveFile += SaveFile;
+
+	}
+
+	private void OnDisable()
+	{
+
+		Actions.OnDisplayData -= DisplayFileData;
+		Actions.OnSetBasicButtonInteractability -= SetAllEntryButtonInput;
+		Actions.OnDeleteSpecificEntry -= DeleteSpecificEntry;
+		Actions.OnAddEntryAfterSpecificEntry -= AddEntryAfterSpecificEntry;
+		Actions.OnSaveFile -= SaveFile;
+
+	}
+
+	public void ClearOldEntries()
+	{
+
+		//Change popup message and enable loading bar
+		Actions.OnOpenPleaseWaitPopup(true, "Deleting Previous Data");
+
+		//Reset scrollbar and next free ID
+		GridViewScrollBar.value = 0;
+		NextUniqueID = 0;
+
+		//Reset window offset
+		ParentWindow.offsetMin = new Vector2(ParentWindow.offsetMin[0], ParentWindowOriginalYOffset[0]);
+		ParentWindow.offsetMax = new Vector2(ParentWindow.offsetMax[0], ParentWindowOriginalYOffset[1]);
+
+		//Gradually delete tiles so not to freeze app
+		StartCoroutine(nameof(ClearOldEntriesAsync));
+
+	}
+
+	private IEnumerator ClearOldEntriesAsync()
+	{
+
+		int updateRateForModulus = Mathf.RoundToInt(AllEntries.Count * LoadingUpdateRate);
+
+		//Destroy all tiles
+		foreach (Tile entry in AllEntries.Values)
 		{
-			OneSingleTile Value;
-			AllEntries.TryGetValue(i, out Value);
-			if (Value != null)
+
+			//Waits for every N entry, letting the rest of the program update
+			if (entry.PositionInFile % updateRateForModulus == 0 && entry.PositionInFile != 0)
 			{
-				GameObject.Destroy(Value.gameObject);
+
+				Actions.OnSetLoadingPercent.InvokeAction((float)entry.PositionInFile / AllEntries.Count);
+				yield return new WaitForEndOfFrame();
+
 			}
+
+			Destroy(entry.gameObject);
+
 		}
+
+		//Clear tiles from dictionary
 		AllEntries.Clear();
 
-		parentWindow.offsetMin = new Vector2(parentWindow.offsetMin[0], parentWindowOriginalYOffset[0]);
-		parentWindow.offsetMax = new Vector2(parentWindow.offsetMax[0], parentWindowOriginalYOffset[1]);
-		NextUniqueID = 0;
+		//Display new tiles now that we've cleared out the old ones
+		StartCoroutine(nameof(DisplayFileDataAsync));
+
+	}
+
+
+	private void SetAllEntryButtonInput(bool status)
+	{
+
+		if (status)
+		{
+
+			EnableAllEntryButtonInput();
+
+		}
+		else
+		{
+
+			DisableAllEntryButtonInput();
+
+		}
+
 	}
 
 	public void DisableAllEntryButtonInput()
-    {
-		for(int i = 0; i < NextUniqueID; i++)
+	{
+
+		foreach (KeyValuePair<int, Tile> entry in AllEntries)
 		{
-			OneSingleTile Value;
-			AllEntries.TryGetValue(i, out Value);
-			if (Value != null)
-			{
-				AllEntries[i].DisableButtonInteractivity();
-			}
-        }
+
+			entry.Value.DisableButtonInteractivity();
+
+		}
+
 	}
 
 	public void EnableAllEntryButtonInput()
 	{
-		for (int i = 0; i < NextUniqueID; i++)
+
+		foreach (KeyValuePair<int, Tile> entry in AllEntries)
 		{
-			OneSingleTile Value;
-			AllEntries.TryGetValue(i, out Value);
-			if (Value != null)
-			{
-				AllEntries[i].EnbableButtonInteractivityIfValid();
-            }
-            else
-            {
-				AllEntries.Remove(i);
-            }
+
+			entry.Value.EnableButtonInteractivityIfValid();
+
 		}
+
 	}
 
-	private void DisplayFileDataDelayed()
-    {
-		string path = OpenedPath;
-		
-		ClearOldEntries();
-		List<string> fileLines = File.ReadAllLines(path).ToList();
-		int numberOfEntries = 0;
-		// now make buttons out of each one
+	private IEnumerator DisplayFileDataAsync()
+	{
+
+        //Update message to show we are now loading the data
+        Actions.OnOpenPleaseWaitPopup(true, "Loading Data");
+
+        //Get all lines in the file
+        List<string> fileLines = File.ReadAllLines(OpenedPath).ToList();
+
+		//Calculate how often we should wait for end of frame so to stop program from freezing up
+        int updateRateForModulus = Mathf.RoundToInt(fileLines.Count * LoadingUpdateRate);
+
+		//Iterate over file lines and create a new tile for each
 		for (int i = 0; i < fileLines.Count; i++)
 		{
-			string line = fileLines[i];
-			bool IsBinding = false;
-			numberOfEntries++;
-			OneSingleTile entry = MakeFreshCopyOfExampleTile(i, i);
-			entry.DisableButtonInteractivity();
-			string[] bindings = GetKeybindingAndBindingName(line);
-			if (bindings.Length == 2) { IsBinding = true; }
-			entry.SetCaptionText(line);
-			AllEntries.Add(NextUniqueID, entry);
-			entry.PositionInParentDictionary = NextUniqueID;
-			NextUniqueID++;
+
+			//Generate tile
+			Tile entry = InstantiateNewExampleTile(i, NextUniqueID);
+
+            //Disable interation with the button while we set it up
+            entry.DisableButtonInteractivity();
+
+			//Add to dictionary
+            AllEntries.Add(NextUniqueID, entry);
+
+            //Increment unique ID, must be done after we assign the tile to the dictionary
+            NextUniqueID++;
+
+			//Convert file line into a usable binding. First part is variable, second is optional value
+			string[] bindings = GetKeybindingAndBindingName(fileLines[i]);
+
+			//If the binding array > 2 then we know this is a KeyBinding and requires an interactable tile
+            bool IsBinding = bindings.Length == 2;
+
+			//Assign display text for the entry
+            entry.SetCaptionText(fileLines[i]);
+
+			//Ensure tile is positioned correctly in the grid
+			entry.SetTilePositionInParentDirectory();
+
 
 			if (IsBinding)
 			{
-				entry.ValidEntry = true;
-				// set up what each button does when pressed
-				{
-					entry.SetButtonDelegate(
-						() =>
-						{
-							DisableAllEntryButtonInput();
-							CHKP.OpenPopupAsBinding(bindings[0], bindings[1], entry);
-						}
-					);
-					entry.SetPlusButtonDelegate(
-						 () =>
-						 {
-							 DisableAllEntryButtonInput();
-							 OrderMakeNewEntry(entry);
-						 }
-					 );
-					entry.SetMinusButtonDelegate(
-						  () =>
-						  {
-							  DisableAllEntryButtonInput();
-							  OrderDeleteSpecificEntry(entry);
-						  }
-					  );
-				}
+
+				//Entry is a keybinding so needs interactability
+				SetupTileInteraction(entry, bindings);
+
 			}
 			else
 			{
+
+				//Entry is not a keybinding so should have no interactability 
 				entry.DisableButton();
+
+			}
+
+			//Waits for every N entry, letting the rest of the program update
+			if (i % updateRateForModulus == 0 && i != 0)
+			{
+
+				//Send a message to the loading bar to update its view
+				Actions.OnSetLoadingPercent.InvokeAction((float)i / fileLines.Count);
+
+				//Wait for message + rest of app to be processed before continuing
+				yield return new WaitForEndOfFrame();
+
 			}
 
 		}
 
-		parentWindow.offsetMin = new Vector2(parentWindow.offsetMin[0], parentWindow.offsetMin[1] - (parentWindow.GetComponent<GridLayoutGroup>().cellSize[1] + parentWindow.GetComponent<GridLayoutGroup>().spacing[1]) * numberOfEntries);
-		PleaseWaitPopup.SetActive(false);
-		EnableAllEntryButtonInput();
+		//Change offset of grid to ensure all tiles fit
+		ParentWindow.offsetMin = new Vector2(ParentWindow.offsetMin[0], ParentWindow.offsetMin[1] - (LayoutGroupForEntries.cellSize[1] + LayoutGroupForEntries.spacing[1]) * fileLines.Count);
+
+		//Close please wait popup and enable button interaction
+		Actions.OnClosePleaseWaitPopup.InvokeAction();
+		Actions.OnSetBasicButtonInteractability(true);
+
+		yield return null;
+
 	}
 
-	public void DisplayFileData (string path)
+	public void DisplayFileData(string path)
 	{
+
+		Actions.OnOpenPleaseWaitPopup.InvokeAction(false, "Selecting File");
 		OpenedPath = path;
-		Invoke(nameof(DisplayFileDataDelayed), 1);
-		PleaseWaitPopup.SetActive(true);
-		ExemplarTile.gameObject.SetActive(false);		
+		ExampleTile.gameObject.SetActive(false);
+		ClearOldEntries();
+
 	}
 
-	public void OrderDeleteSpecificEntry(OneSingleTile zEntry)
-    {
+	public void OrderDeleteSpecificEntry(Tile zEntry)
+	{
 		string[] caption = GetKeybindingAndBindingName(zEntry.GetCaptionText());
-		DHP.Open(caption[1], caption[0], zEntry.PositionInParentDictionary);
-    }
-
-	public void DeleteSpecificEntry(int EntryID)
-	{
-		GameObject.Destroy(AllEntries[EntryID].gameObject);
-		AllEntries.Remove(EntryID);
-		//ShiftEntriesLeft(EntryID);
+		Actions.OnOpenDeleteHotkeyPopup.InvokeAction(caption[1], caption[0], zEntry.PositionInFile, zEntry.IDInDictionary);
 	}
 
-	public void OrderMakeNewEntry(OneSingleTile zEntry)
-    {
-		AHP.Open(zEntry.PositionInWrittenFile);
-    }
-
-	public void ShiftEntriesRight(int zStartIndex)
+	public void DeleteSpecificEntry(int EntryID, int PositionInDict)
 	{
-		AllEntries.Add(NextUniqueID, null);
-		for (int i = NextUniqueID-1; i > zStartIndex; i--)
-        {
-			ShiftAnEntry(i, 1);
-		}
-		NextUniqueID++;
+
+		//Destroy the targeted tile then remove the now null object from dictionary
+		Destroy(AllEntries[PositionInDict].gameObject);
+		AllEntries.Remove(PositionInDict);
+
+		//Move tiles upwards to fill gap left by destroyed tile
+		Actions.OnShiftAllTilesUp.InvokeAction(EntryID);
+
 	}
 
-	public void ShiftEntriesLeft(int zStartIndex)
+	public void OrderMakeNewEntry(Tile zEntry)
 	{
-		for (int i = zStartIndex; i < NextUniqueID; i++)
-		{
-			ShiftAnEntry(i, -1);
-		}
-
-		AllEntries.Remove(NextUniqueID);
-		NextUniqueID--;
-	}
-
-	private void ShiftAnEntry(int zEntryIndex, int zDirection)
-	{
-		if (AllEntries.ContainsKey(zEntryIndex))
-		{
-			AllEntries[zEntryIndex].PositionInParentDictionary += zDirection;
-			AllEntries[zEntryIndex].PositionInWrittenFile += zDirection;
-			AllEntries[zEntryIndex + zDirection] = AllEntries[zEntryIndex];
-		}
+		Actions.OnOpenAddHotkeyPopup.InvokeAction(zEntry.PositionInFile);
 	}
 
 	public void AddEntryAfterSpecificEntry(int PreviousEntryID, string BindingName, string Binding)
 	{
-		ShiftEntriesRight(PreviousEntryID+1);
-		string line = "    " + BindingName + " = " + '"' + Binding + '"' + ',';
-		OneSingleTile entry = MakeFreshCopyOfExampleTile(NextUniqueID,PreviousEntryID + 1);
+
+		//Firstly make space for the new tile
+		Actions.OnShiftAllTilesDown.InvokeAction(PreviousEntryID);
+
+		//Create button and disable it immedietly 
+		Tile entry = InstantiateNewExampleTile(PreviousEntryID + 1, NextUniqueID);
 		entry.DisableButtonInteractivity();
+
+		//Calculate keybinding and name of binding then assign its caption
+		string line = "    " + BindingName + " = " + '"' + Binding + '"' + ',';
 		string[] bindings = GetKeybindingAndBindingName(line);
 		entry.SetCaptionText(line);
+
+		//Add to dictionary
 		AllEntries.Add(NextUniqueID, entry);
-		entry.PositionInParentDictionary = NextUniqueID;
+
+		//Shift all tiles beneath new tile down then insert new tile in the correct position 
+		Actions.OnChangeTileLayout.InvokeAction(entry.PositionInFile, 0);
+
+		//Increment Unique ID
 		NextUniqueID++;
 
-		// set up what each button does when pressed
+		//Assign on press behaviour to the tile and its buttons
+		SetupTileInteraction(entry, bindings);
+
+		//Open tile we just made to assign its binding
+		Actions.OnOpenPopupAsBinding.InvokeAction(bindings[0], bindings[1], entry);
+	}
+
+	private void SetupTileInteraction(Tile entry, string[] bindings)
+	{
+
 		{
+
+			//The entry should be interactable
 			entry.ValidEntry = true;
+
+			//Button to open edit popup
 			entry.SetButtonDelegate(
 				() =>
 				{
-					DisableAllEntryButtonInput();
-					CHKP.OpenPopupAsBinding(bindings[0], bindings[1], entry);
+					Actions.OnSetBasicButtonInteractability.InvokeAction(false);
+					Actions.OnOpenPopupAsBinding.InvokeAction(bindings[0], bindings[1], entry);
 				}
 			);
+
+			//Button to add entry
 			entry.SetPlusButtonDelegate(
 				 () =>
 				 {
-					 DisableAllEntryButtonInput();
+					 Actions.OnSetBasicButtonInteractability.InvokeAction(false);
 					 OrderMakeNewEntry(entry);
 				 }
 			 );
+
+			//Button to destroy entry
 			entry.SetMinusButtonDelegate(
 				  () =>
 				  {
-					  DisableAllEntryButtonInput();
+					  Actions.OnSetBasicButtonInteractability.InvokeAction(false);
 					  OrderDeleteSpecificEntry(entry);
 				  }
 			  );
 		}
-		CHKP.OpenPopupAsBinding(bindings[0], bindings[1], entry);
+
 	}
 
 	public void SaveFile(string path)
-    {
+	{
+
 		bool HasAlreadyGotWatermark = false;
-		string[] AllLines = new string[NextUniqueID+1];
-		string[] AllLinesExtra = new string[NextUniqueID + 6];
+		string[] AllLines = new string[NextUniqueID + 1];
+
+		//Iterate over every tile and add its caption to the saving array
+		//Caption is formated correctly for bindings so does not need any manipulation
 		for (int i = 0; i <= NextUniqueID; i++)
 		{
-			OneSingleTile Value;
+
+			//Get tile data to be interpreted
+			Tile Value;
 			AllEntries.TryGetValue(i, out Value);
+
 			if (Value != null)
 			{
+
+				//Add entry to the array for saving later
 				AllLines[Value.transform.GetSiblingIndex()] = Value.GetCaptionText();
+
 				if (!HasAlreadyGotWatermark)
 				{
-					AllLinesExtra[Value.transform.GetSiblingIndex() + 5] = Value.GetCaptionText();
-					if (Value.GetCaptionText() == "-- Created using Dawn of War Hotkey Editor Tool. https://www.moddb.com/mods/hotkey-editor-tool")
+
+					//Check if line is equal to a unique part of the watermark
+					if (Value.GetCaptionText() == Watermark[IndexOfIdentifiableWatermark])
 					{
+
 						HasAlreadyGotWatermark = true;
+
 					}
+
 				}
 			}
 			else
 			{
+
+				//Cleanup an invalid entry. Realistically, this should never happen
 				AllEntries.Remove(i);
+
 			}
+
 		}
 
+		//If we're missing watermark, add it on
 		if (HasAlreadyGotWatermark == false)
 		{
-			AllLinesExtra[0] = "";
-			AllLinesExtra[1] = "        ----------------------------------------------------------------------------------------------------------------";
-			AllLinesExtra[2] = "        -- Created using Dawn of War Hotkey Editor Tool. https://www.moddb.com/mods/hotkey-editor-tool";
-			AllLinesExtra[3] = "        ----------------------------------------------------------------------------------------------------------------";
-			AllLinesExtra[4] = "";
-			File.WriteAllLines(path, AllLinesExtra);
-        }
-        else
-        {
-			File.WriteAllLines(path, AllLines);
+
+			AllLines = Watermark.Concat(AllLines).ToArray();
+
 		}
+
+		//Write to file
+		File.WriteAllLines(path, AllLines);
+
+	}
+
+	private bool GetIfCharacterBreaksVariableSyntax(char character)
+	{
+		return Ignore.Contains(character) || System.Char.IsWhiteSpace(character);
+
     }
 
 	private string[] GetKeybindingAndBindingName(string line)
-    {
-		char[] lineCharArr = line.ToArray();
-		if(line.Length > 2)
-        {
-			string KeybindingName = null;
-			string Keybinding = null;
-			bool LookingForKeybinding = false;
-			bool SettingKeybindingName = true;
-			bool BegunSettingKeybindingName = false;
-			for (int i = 0; i < lineCharArr.Length; i++)
-			{
-				if (LookingForKeybinding)
-				{
-					if (lineCharArr[i] == '"')
-                    {
-						return new string[2] { KeybindingName, Keybinding };
-                    }
-					Keybinding += lineCharArr[i];
-				}
-				else if (lineCharArr[i] == '"')
-				{
-					LookingForKeybinding = true;
-                }
-                else if(SettingKeybindingName)
-                {
-                    if (BegunSettingKeybindingName)
-					{
-						if (Ignore.Contains(lineCharArr[i]) || System.Char.IsWhiteSpace(lineCharArr[i]))
-						{
-							SettingKeybindingName = false;
-						}
-                        else
-                        {
-							KeybindingName += lineCharArr[i];
+	{
 
-							if (KeybindingName == "bindings_version")
-							{
-								//Bindings version is a float that will require additional behaviour, so for now just ignoring him. maybe behaviour added in future.
-								return new string[0];
-							}
-						}
+		char[] lineCharArr = line.ToArray();
+
+		if (line.Length <= 2)
+		{
+
+			//The line is too short to contain keybinding
+			return new string[0];
+
+		}
+
+		//Assign initial variables
+		string KeybindingName = null;
+		string Keybinding = null;
+
+		bool SettingActualKeybinding = false;
+		bool SettingKeybindingName = true;
+		bool BegunSettingKeybindingName = false;
+
+		//Iterate over eachcharacter of the line
+		for (int i = 0; i < lineCharArr.Length; i++)
+		{
+
+			//First step, determine variable name
+			if (SettingKeybindingName)
+			{
+
+				if (BegunSettingKeybindingName)
+				{
+					//Variable start has been found and we are assigning it
+					if (GetIfCharacterBreaksVariableSyntax(lineCharArr[i]))
+					{
+
+						//Detected something that's not compatable with variable syntax, assume
+						SettingKeybindingName = false;
+
 					}
 					else
 					{
-						if (i != lineCharArr.Count()-1)
+
+						//Continue updating the name
+						KeybindingName += lineCharArr[i];
+
+						if (KeybindingName == "bindings_version")
 						{
-							if (lineCharArr[i] == '-' && lineCharArr[i + 1] == '-')
-							{
-								//Comment before keybinding, returning
-								return new string[0];
-							}
-                        }
-                        else
-                        {
-							//No chance to have a keybinding anymore, length < 2
+
+							//Bindings version is a float that will require additional behaviour, so for now just ignoring him.
+							//Note: Ultimate Apocalypse mod decided to change their hotkeys mod version (for whatever reason....)
+							//...so for compatability will need functionality later for this float
 							return new string[0];
+
 						}
 
-						if (!Ignore.Contains(lineCharArr[i]) && !System.Char.IsWhiteSpace(lineCharArr[i]))
-						{
-							KeybindingName += lineCharArr[i];
-							BegunSettingKeybindingName = true;
-						}
-                    }
-                }
-            }
+					}
 
-			if (Keybinding == null) 
-			{
-				//Has var = format but no keybinding associated! This is likely the "binding = " bit.
-				return new string[0]; 
+				}
+				else
+				{
+					//Still trying to find the start of the variable.
+					if (i == lineCharArr.Count() - 1)
+					{
+
+						//No chance to have a keybinding anymore as remaining length of line < 2
+						return new string[0];
+
+					}
+
+					if (lineCharArr[i] == '-' && lineCharArr[i + 1] == '-')
+					{
+
+						//Comment before keybinding, returning
+						return new string[0];
+
+					}
+
+					//Ensure character is following variable syntax correctly
+					if (GetIfCharacterBreaksVariableSyntax(lineCharArr[i]) == false)
+					{
+
+						KeybindingName += lineCharArr[i];
+						BegunSettingKeybindingName = true;
+
+					}
+
+				}
+
 			}
-			return new string[2] { KeybindingName, Keybinding };
+			else if (SettingActualKeybinding)
+			{
+
+				if (lineCharArr[i] == '"')
+				{
+
+					// " indicates end of the binding so return
+					return new string[2] { KeybindingName, Keybinding };
+
+				}
+
+				//If not end, add the character to the binding
+				Keybinding += lineCharArr[i];
+
+			}
+			else if (lineCharArr[i] == '"')
+			{
+
+				// " Indicates start of binding so now we look for binding
+				SettingActualKeybinding = true;
+
+			}
+
+
 		}
-        else
-        {
-			//The line is too short to contain keybinding
+
+		if (Keybinding == null)
+		{
+
+			//Has var = format but no keybinding associated! This is likely the "binding = " bit.
+			//Note: This could also be a syntax error, in future might want to highlight / rectify this.
 			return new string[0];
-        }
-    }
+
+		}
+
+		return new string[2] { KeybindingName, Keybinding };
+
+	}
 
 }

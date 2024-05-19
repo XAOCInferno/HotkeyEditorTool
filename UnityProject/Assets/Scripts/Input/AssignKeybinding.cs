@@ -1,17 +1,20 @@
-using System.Collections;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using UnityEngine;
-using System.Linq;
 using TMPro;
 
 public class AssignKeybinding : MonoBehaviour
 {
+
+    //Popup text display
     public TextMeshProUGUI BindingText;
 
+    //WinAPI keyboard input
     [DllImport("user32.dll", CharSet = CharSet.Auto, ExactSpelling = true, CallingConvention = CallingConvention.Winapi)]
     private static extern short GetKeyState(int keyCode);
 
+    //Valid inputs with their string counterparts
+    //Arr[0] = Numlock On | Arr[2] = Numlock Off
     private Dictionary<KeyCode, string[]> AcceptedKeyCodePairs = new Dictionary<KeyCode, string[]>
     {
         { KeyCode.A, new string[2]{"A", "A" } },
@@ -116,71 +119,115 @@ public class AssignKeybinding : MonoBehaviour
         { KeyCode.Escape, new string[2]{ "Escape", "Escape" } }
     };
 
-    private List<string> CurrentSpecialKeybinding = new();
-    private List<KeyCode> CurrentShiftControlKeybinding = new();
-    private List<KeyCode> Currentkeybinding = new();
+    private List<KeyCode> SpecialBindings = new() { KeyCode.LeftAlt, KeyCode.RightAlt, KeyCode.LeftControl, KeyCode.RightControl, KeyCode.LeftShift, KeyCode.RightShift };
+
+    private string CurrentSpecialNonKeyBindings;
+    private List<KeyCode> CurrentSpecialKeyCodes = new();
+    private List<KeyCode> CurrentKeyCodes = new();
 
     void Update()
     {
-        if (isActiveAndEnabled)
-        {
-            GetKeyInputs();
-        }
+
+        GetKeyInputs();
+
     }
 
     private void GetKeyInputs()
     {
-        if (Input.anyKey)
+
+        //No inputs being pressed
+        if (!Input.anyKey)
         {
-            for (int i = 0; i < AcceptedKeyCodePairs.Count; i++)
+            return;
+        }
+
+        foreach(KeyCode element in AcceptedKeyCodePairs.Keys)
+        {
+
+            //Find which button is pressed
+            if (Input.GetKey(element))
             {
-                var element = AcceptedKeyCodePairs.ElementAt(i);
-                if (Input.GetKey(element.Key))
+
+                if (SpecialBindings.Contains(element))
                 {
-                    if (element.Key == KeyCode.LeftControl || element.Key == KeyCode.RightControl || element.Key == KeyCode.LeftShift || element.Key == KeyCode.RightShift || element.Key == KeyCode.LeftAlt || element.Key == KeyCode.RightAlt)
+
+                    //Binding is special, EG: shift, alt, ctrl
+                    if (CurrentSpecialKeyCodes.Contains(element) == false)
                     {
-                        if (!CurrentShiftControlKeybinding.Contains(element.Key))
-                        {
-                            CurrentShiftControlKeybinding.Add(element.Key);
-                        }
+
+                        CurrentSpecialKeyCodes.Add(element);
+
                     }
-                    else
-                    {
-                        CurrentSpecialKeybinding.Clear();
-                        if (!Currentkeybinding.Contains(element.Key))
-                        {
-                            if (Currentkeybinding.Count == 0)
-                            {
-                                Currentkeybinding.Add(element.Key);
-                            }
-                            else
-                            {
-                                Currentkeybinding[0] = element.Key;
-                            }
-                        }
-                    }
-                    UpdateBindingText();
+
                 }
+                else
+                {
+                    //Generic key EG; abc123
+
+                    //Cannot combine generic keys with Non-Key bindings
+                    CurrentSpecialNonKeyBindings = "";
+
+                    //Must be unique
+                    if (!CurrentKeyCodes.Contains(element))
+                    {
+
+                        //Add input, can only have 1 generic binding key
+                        AddOrAmmendBindingToList(CurrentKeyCodes, element);
+
+                    }
+
+                }
+
+                //Update displayed binding on the popup
+                UpdateBindingText();
+
+                //Found the pressed key so can now return, no need to support multi-press
+                return;
+
             }
         }
+        
     }
 
     public void SetSpecialKeybinding(string binding)
     {
-        if (!CurrentSpecialKeybinding.Contains(binding))
+
+        //Must be unique
+        if (CurrentSpecialNonKeyBindings == binding)
         {
-            Currentkeybinding.Clear();
-            if (CurrentSpecialKeybinding.Count == 0)
-            {
-                CurrentSpecialKeybinding.Add(binding);
-            }
-            else
-            {
-                CurrentSpecialKeybinding[0] = binding;
-            }
-            
-            UpdateBindingText();
+            return;
         }
+
+        //Cannot combine generic keys with Non-Key bindings
+        CurrentKeyCodes.Clear();
+
+        //Add input, can only have 1 special non key binding
+        CurrentSpecialNonKeyBindings = binding;
+
+        //Display input
+        UpdateBindingText();
+
+    }
+
+    //Use for lists that can only contain 1 item
+    private void AddOrAmmendBindingToList<A>( List<A> list, A newItem )
+    {
+        
+        if (list.Count == 0)
+        {
+
+            //List is empty so use add
+            list.Add(newItem);
+
+        }
+        else
+        {
+
+            //List has entry so replace it
+            list[0] = newItem;
+
+        }
+
     }
 
     private bool GetNumLock()
@@ -190,59 +237,89 @@ public class AssignKeybinding : MonoBehaviour
 
     void UpdateBindingText()
     {
+        //Begin string, ensuring correct syntax
         BindingText.text = "";
-        BindingText.text += '"'.ToString();
-        int NumLockOffset = 0;
+        BindingText.text += '"';
+
+        //Get if we're using numlock
+        int NumLockOffset;
 
         if (GetNumLock())
         {
-            NumLockOffset++;
+
+            //Use second array of bindings 
+            NumLockOffset = 1;
+
+        }
+        else
+        {
+
+            NumLockOffset = 0;
+
         }
 
-        for (int i = 0; i < CurrentShiftControlKeybinding.Count; i++)
+        //Firstly add the special keys (shift, ctrl, alt)
+        for (int i = 0; i < CurrentSpecialKeyCodes.Count; i++)
         {
-            BindingText.text += AcceptedKeyCodePairs[CurrentShiftControlKeybinding[i]][0 + NumLockOffset];
 
-            if (i == CurrentShiftControlKeybinding.Count - 1 && CurrentSpecialKeybinding.Count == 0 && Currentkeybinding.Count == 0)
+            //Add the binding
+            BindingText.text += AcceptedKeyCodePairs[CurrentSpecialKeyCodes[i]][0 + NumLockOffset];
+
+            //Breakoff early if there are no other bindings at all to add
+            if (i == CurrentSpecialKeyCodes.Count - 1 && CurrentSpecialNonKeyBindings == "" && CurrentKeyCodes.Count == 0)
             {
+
                 break;
+
             }
 
+            //There is more bindings later on so add the + sign
             BindingText.text += " + ";
+
         }
 
-        for (int i = 0; i < Currentkeybinding.Count; i++)
+        for (int i = 0; i < CurrentKeyCodes.Count; i++)
         {
-            BindingText.text += AcceptedKeyCodePairs[Currentkeybinding[i]][0 + NumLockOffset];
 
-            if (i == Currentkeybinding.Count-1 && CurrentSpecialKeybinding.Count == 0)
+            //Add the binding
+            BindingText.text += AcceptedKeyCodePairs[CurrentKeyCodes[i]][0 + NumLockOffset];
+
+            //Breakoff early if there are no other bindings at all to add
+            if (i == CurrentKeyCodes.Count-1 && CurrentSpecialNonKeyBindings == "")
             {
+
                 break;
+
             }
 
+            //There is more bindings later on so add the + sign
             BindingText.text += " + ";            
         }
 
-        for (int i = 0; i < CurrentSpecialKeybinding.Count; i++)
-        {
-            BindingText.text += CurrentSpecialKeybinding[i];
+        //Assign mouse / screen related bindings at the end
+        if(CurrentSpecialNonKeyBindings != "") 
+        { 
 
-            if (i == CurrentSpecialKeybinding.Count - 1)
-            {
-                break;
-            }
+            BindingText.text += CurrentSpecialNonKeyBindings;
 
-            BindingText.text += " + ";
         }
-        BindingText.text += '"'.ToString();
+
+        //Close off string, ensuring correct syntax
+        BindingText.text += '"';
         BindingText.text += ",";
+
     }
 
     public void ClearKeybinding()
     {
-        Currentkeybinding.Clear();
-        CurrentSpecialKeybinding.Clear();
-        CurrentShiftControlKeybinding.Clear();
+
+        //Clear the entire binding
+        CurrentKeyCodes.Clear();
+        CurrentSpecialNonKeyBindings = "";
+        CurrentSpecialKeyCodes.Clear();
+
+        //Update the text to reflect recent change
         UpdateBindingText();
+
     }
 }

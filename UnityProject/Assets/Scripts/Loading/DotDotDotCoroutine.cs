@@ -1,30 +1,40 @@
 using System.Collections;
-using System.Collections.Generic;
 using UnityEngine;
 using TMPro;
 
 public class DotDotDotCoroutine : MonoBehaviour
 {
-    public TextMeshProUGUI Target;
-    private int NumberOfDots = 0;
+    [SerializeField] private TextMeshProUGUI Target;
+    private const float AnimationRate = 0.5f;
 
     private void OnEnable()
     {
+
+        //Reset text and begin playing dot dot dot
         Target.text = "";
-        StartCoroutine(Fade());
+        StartCoroutine(DotDotDot());
+
     }
 
     private void OnDisable()
     {
-        StopCoroutine(Fade());
-        Target.text = "";
+
+        StopCoroutine(DotDotDot());
+
     }
 
-    IEnumerator Fade()
+    IEnumerator DotDotDot()
     {
+
+        int NumberOfDots = 0;
+
         while(true)
         {
-            if(NumberOfDots == 3)
+
+            //Wait first so dot doesn't show initially
+            yield return new WaitForSeconds(AnimationRate);
+
+            if (NumberOfDots == 3)
             {
                 Target.text = "";
                 NumberOfDots = 0;
@@ -34,7 +44,6 @@ public class DotDotDotCoroutine : MonoBehaviour
                 Target.text += '.';
                 NumberOfDots++;
             }
-            yield return new WaitForSeconds(0.5f);
         }
     }
 }
