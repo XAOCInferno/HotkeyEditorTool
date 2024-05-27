@@ -20,8 +20,8 @@ public class KeybindingDisplayAndEditor : MonoBehaviour
 	private float LoadingUpdateRate = 0.025f;
 	private GridLayoutGroup LayoutGroupForEntries;
 
-	private const int IndexOfIdentifiableWatermark = 3;
-	private readonly string[] Watermark = new string[6]
+	private const int IndexOfIdentifiableWatermark = 3; // -- Created using Dawn of War Hotkey Editor Tool. https://www.moddb.com/mods/hotkey-editor-tool",
+    private readonly string[] Watermark = new string[6]
 	{
 		"----------------------------------------------------------------------------------------------------------------",
 		"",
