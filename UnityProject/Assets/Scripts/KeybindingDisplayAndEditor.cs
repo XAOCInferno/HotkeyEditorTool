@@ -5,6 +5,33 @@ using System.IO;
 using UnityEngine.UI;
 using System.Linq;
 
+public struct Keybind
+{
+	public string KeyBindVariable;
+	public string KeyBindValue;
+    public bool IsAKeyBinding;
+
+    public Keybind(string _KeyBindVariable = "", string _KeyBindValue = "")
+	{
+		KeyBindVariable = _KeyBindVariable;
+		KeyBindValue = _KeyBindValue;
+
+		if(KeyBindValue != "")
+		{
+
+            IsAKeyBinding = true;
+
+		}
+		else
+		{
+
+            IsAKeyBinding = false;
+
+		}
+
+	}
+}
+
 public class KeybindingDisplayAndEditor : MonoBehaviour
 {
 	[SerializeField] private Tile ExampleTile;
@@ -190,23 +217,18 @@ public class KeybindingDisplayAndEditor : MonoBehaviour
 		for (int i = 0; i < fileLines.Count; i++)
 		{
 
-			//Generate tile
-			Tile entry = InstantiateNewExampleTile(i, NextUniqueID);
-
-            //Disable interation with the button while we set it up
+            //Generate tile and disable interation with the button while we set it up
+            Tile entry = InstantiateNewExampleTile(i, NextUniqueID);
             entry.DisableButtonInteractivity();
 
 			//Add to dictionary
             AllEntries.Add(NextUniqueID, entry);
 
-            //Increment unique ID, must be done after we assign the tile to the dictionary
+            //Increment unique ID for the next tile, must be done after adding to dictionary
             NextUniqueID++;
 
-			//Convert file line into a usable binding. First part is variable, second is optional value
-			string[] bindings = GetKeybindingAndBindingName(fileLines[i]);
-
-			//If the binding array > 2 then we know this is a KeyBinding and requires an interactable tile
-            bool IsBinding = bindings.Length == 2;
+			//Convert file line into a usable binding pair
+			Keybind binding = GetKeybindingAndBindingName(fileLines[i]);
 
 			//Assign display text for the entry
             entry.SetCaptionText(fileLines[i]);
@@ -215,11 +237,11 @@ public class KeybindingDisplayAndEditor : MonoBehaviour
 			entry.SetTilePositionInParentDirectory();
 
 
-			if (IsBinding)
+			if (binding.IsAKeyBinding)
 			{
 
 				//Entry is a keybinding so needs interactability
-				SetupTileInteraction(entry, bindings);
+				SetupTileInteraction(entry, binding);
 
 			}
 			else
@@ -267,8 +289,8 @@ public class KeybindingDisplayAndEditor : MonoBehaviour
 
 	public void OrderDeleteSpecificEntry(Tile zEntry)
 	{
-		string[] caption = GetKeybindingAndBindingName(zEntry.GetCaptionText());
-		Actions.OnOpenDeleteHotkeyPopup.InvokeAction(caption[1], caption[0], zEntry.PositionInFile, zEntry.IDInDictionary);
+		Keybind bindingCaption = GetKeybindingAndBindingName(zEntry.GetCaptionText());
+		Actions.OnOpenDeleteHotkeyPopup.InvokeAction(bindingCaption.KeyBindValue, bindingCaption.KeyBindVariable, zEntry.PositionInFile, zEntry.IDInDictionary);
 	}
 
 	public void DeleteSpecificEntry(int EntryID, int PositionInDict)
@@ -300,7 +322,7 @@ public class KeybindingDisplayAndEditor : MonoBehaviour
 
 		//Calculate keybinding and name of binding then assign its caption
 		string line = "    " + BindingName + " = " + '"' + Binding + '"' + ',';
-		string[] bindings = GetKeybindingAndBindingName(line);
+		Keybind binding = GetKeybindingAndBindingName(line);
 		entry.SetCaptionText(line);
 
 		//Add to dictionary
@@ -313,13 +335,13 @@ public class KeybindingDisplayAndEditor : MonoBehaviour
 		NextUniqueID++;
 
 		//Assign on press behaviour to the tile and its buttons
-		SetupTileInteraction(entry, bindings);
+		SetupTileInteraction(entry, binding);
 
 		//Open tile we just made to assign its binding
-		Actions.OnOpenPopupAsBinding.InvokeAction(bindings[0], bindings[1], entry);
+		Actions.OnOpenPopupAsBinding.InvokeAction(binding.KeyBindVariable, binding.KeyBindValue, entry);
 	}
 
-	private void SetupTileInteraction(Tile entry, string[] bindings)
+	private void SetupTileInteraction(Tile entry, Keybind binding)
 	{
 
 		{
@@ -332,7 +354,7 @@ public class KeybindingDisplayAndEditor : MonoBehaviour
 				() =>
 				{
 					Actions.OnSetBasicButtonInteractability.InvokeAction(false);
-					Actions.OnOpenPopupAsBinding.InvokeAction(bindings[0], bindings[1], entry);
+					Actions.OnOpenPopupAsBinding.InvokeAction(binding.KeyBindVariable, binding.KeyBindValue, entry);
 				}
 			);
 
@@ -420,7 +442,7 @@ public class KeybindingDisplayAndEditor : MonoBehaviour
 
     }
 
-	private string[] GetKeybindingAndBindingName(string line)
+	private Keybind GetKeybindingAndBindingName(string line)
 	{
 
 		char[] lineCharArr = line.ToArray();
@@ -429,7 +451,7 @@ public class KeybindingDisplayAndEditor : MonoBehaviour
 		{
 
 			//The line is too short to contain keybinding
-			return new string[0];
+			return new Keybind();
 
 		}
 
@@ -471,7 +493,7 @@ public class KeybindingDisplayAndEditor : MonoBehaviour
 							//Bindings version is a float that will require additional behaviour, so for now just ignoring him.
 							//Note: Ultimate Apocalypse mod decided to change their hotkeys mod version (for whatever reason....)
 							//...so for compatability will need functionality later for this float
-							return new string[0];
+							return new Keybind();
 
 						}
 
@@ -485,7 +507,7 @@ public class KeybindingDisplayAndEditor : MonoBehaviour
 					{
 
 						//No chance to have a keybinding anymore as remaining length of line < 2
-						return new string[0];
+						return new Keybind();
 
 					}
 
@@ -493,7 +515,7 @@ public class KeybindingDisplayAndEditor : MonoBehaviour
 					{
 
 						//Comment before keybinding, returning
-						return new string[0];
+						return new Keybind();
 
 					}
 
@@ -516,7 +538,7 @@ public class KeybindingDisplayAndEditor : MonoBehaviour
 				{
 
 					// " indicates end of the binding so return
-					return new string[2] { KeybindingName, Keybinding };
+					return new Keybind(KeybindingName, Keybinding);
 
 				}
 
@@ -540,11 +562,11 @@ public class KeybindingDisplayAndEditor : MonoBehaviour
 
 			//Has var = format but no keybinding associated! This is likely the "binding = " bit.
 			//Note: This could also be a syntax error, in future might want to highlight / rectify this.
-			return new string[0];
+			return new Keybind();
 
 		}
 
-		return new string[2] { KeybindingName, Keybinding };
+		return new Keybind(KeybindingName, Keybinding);
 
 	}
 
